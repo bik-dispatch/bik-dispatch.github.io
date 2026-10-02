@@ -7,7 +7,7 @@
      running as script would carry it off. So scripts come only from this
      origin (app.js), there is no inline script and no inline handler, and
      every server string reaches the page as text, never as markup. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https: http://127.0.0.1:* http://localhost:*; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://*.ts.net:8600 http://127.0.0.1:8600 http://localhost:8600; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#07080A">
 <meta name="color-scheme" content="dark light">
@@ -198,7 +198,7 @@ textarea:focus{border-color:var(--mid)}
   </section>
 
   <section id="connect" class="panel" hidden aria-label="connect">
-    <p class="lead">Not connected. Open the desk once on this phone, or open a dispatch connect code from the Mac.</p>
+    <p class="lead">Not connected. On the Mac, show the dispatch connect code (connect.py dispatch --qr) and scan it with this phone's camera.</p>
     <label for="capi">SPINE ADDRESS</label>
     <input id="capi" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://….ts.net:8600">
     <label for="ctok">KEY</label>

@@ -137,9 +137,9 @@ self.addEventListener('push', e => {
 
 // The push service rotated our endpoint. Re-subscribe with the same key and
 // tell any open Dispatch page. This worker holds NO bearer by design (it
-// cannot read localStorage, and the desk's key must not live in a second
-// place), so the PAGE posts the new subscription to the spine at its next
-// boot, or at once if it is open and hears RESUBSCRIBED.
+// cannot read localStorage, and the key must live in one place on this
+// origin: the page's storage), so the PAGE posts the new subscription to the
+// spine at its next boot, or at once if it is open and hears RESUBSCRIBED.
 self.addEventListener('pushsubscriptionchange', e => {
   const scope = self.registration.scope;
   const key = e.oldSubscription?.options?.applicationServerKey;

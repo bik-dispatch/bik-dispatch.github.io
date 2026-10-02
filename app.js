@@ -13,15 +13,15 @@ try { if (localStorage.getItem('dispatch_theme') === 'sun') document.documentEle
    THE RENDERING RULE (load-bearing): every string the spine sends (titles,
    bodies, card titles, errors) reaches the page through textContent or
    createTextNode. This file never parses a server string as markup and never
-   auto-links. This origin's storage also holds the desk's bearer, so one card
-   title running as script would carry it off; the page's CSP is the second
-   lock.
+   auto-links. This origin's storage holds the spine's bearer (Dispatch's own
+   copy since card #388), so one card title running as script would carry it
+   off; the page's CSP is the second lock.
 
    THE ATTRIBUTION GUARD: Dispatch registers ITS OWN worker at ./ and
    subscribes through that registration only, with the scope checked. The
-   container's ready promise is never used: on a first visit it resolves to
-   the ROOT Almanac registration, and a subscription made there would ring
-   under the Almanac icon, not this one. */
+   container's ready promise is never used. Since card #388 Dispatch is the
+   only app on its own origin (bik-dispatch.github.io), but the check stays:
+   a subscription must belong to the registration whose icon it rings. */
 (function () {
 'use strict';
 
@@ -99,8 +99,9 @@ function theme(mode) {
 }
 
 /* ── the connection ──────────────────────────────────────────────────────
-   API and TOK are the desk's own keys on this origin, so a phone that has
-   opened the desk once is already connected here. */
+   Dispatch has its OWN origin and storage since card #388, so it holds its
+   own copy of the spine's address and key, set only by a dispatch connect
+   code (connect.py dispatch --qr). The desk's storage is out of reach. */
 function loadCfg() {
   S.api = (store.get('almanac_api') || '').replace(/\/+$/, '');
   S.tok = store.get('almanac_token') || '';
@@ -108,14 +109,16 @@ function loadCfg() {
 const configured = () => !!(S.api && S.tok);
 
 /* The only spine addresses a connect code may carry: this Mac on the tailnet
-   (https, a .ts.net name, with the spine's port) or this Mac's loopback.
+   (https, a .ts.net name, on the spine's port 8600) or this Mac's loopback
+   on 8600. The port is checked (review of #388): Tailscale Funnel serves only
+   443/8443/10000, so a stranger's public ts.net host can never pass here.
    Anything else could be a stranger's server collecting his key. */
 function apiShape(raw) {
   let u;
   try { u = new URL(String(raw || '').trim()); } catch (e) { return null; }
   if (u.username || u.password || u.search || u.hash || u.pathname !== '/') return null;
-  const tailnet = u.protocol === 'https:' && /^[a-z0-9-]+(\.[a-z0-9-]+)*\.ts\.net$/i.test(u.hostname);
-  const loop = u.protocol === 'http:' && (u.hostname === '127.0.0.1' || u.hostname === 'localhost') && !!u.port;
+  const tailnet = u.protocol === 'https:' && u.port === '8600' && /^[a-z0-9-]+(\.[a-z0-9-]+)*\.ts\.net$/i.test(u.hostname);
+  const loop = u.protocol === 'http:' && (u.hostname === '127.0.0.1' || u.hostname === 'localhost') && u.port === '8600';
   return tailnet || loop ? u.origin : null;
 }
 
