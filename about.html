@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+<meta name="color-scheme" content="dark light">
+<title>BMH Solutions — operator tools</title>
+<style>
+  /* The home page Google's OAuth consent screen points to (card #412). It
+     describes the private tools behind the "BMH Email Drafts" sign-in in
+     plain words. No scripts, no tracking, nothing loaded from elsewhere. */
+  :root{--bg:#f6f7f5;--fg:#16191b;--dim:#555e63;--rule:#d9ddd8;--link:#1f6f4a}
+  @media (prefers-color-scheme:dark){:root{--bg:#121619;--fg:#e7ece9;--dim:#93a1a8;--rule:#2b343b;--link:#6fd19b}}
+  html,body{margin:0;background:var(--bg);color:var(--fg)}
+  body{font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:32px 18px 56px}
+  main{max-width:640px;margin:0 auto}
+  h1{font-size:26px;line-height:1.2;margin:0 0 6px}
+  h2{font-size:17px;margin:28px 0 6px}
+  p,li{max-width:62ch}
+  .sub{color:var(--dim);margin:0 0 20px}
+  a{color:var(--link)}
+  footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--rule);color:var(--dim);font-size:14px}
+</style>
+</head>
+<body>
+<main>
+  <h1>BMH Solutions LLC</h1>
+  <p class="sub">Private operator tools for a one-truck hotshot carrier.</p>
+
+  <p>BMH Solutions is a small trucking business run by its owner, Bryan Hertzig. The tools on this site support that one business. They are not offered to the public, and no one else can sign in to them.</p>
+
+  <h2>The "BMH Email Drafts" sign-in</h2>
+  <p>The owner uses one Google sign-in, on his own computer, for two jobs in his own business Gmail account:</p>
+  <ul>
+    <li><b>Reading the inbox, read-only.</b> A program on his computer checks new mail and alerts him on his phone when a broker pays him or asks for paperwork, so a payment notice can't get buried. It never sends, deletes, labels or changes any email.</li>
+    <li><b>Writing drafts.</b> After a delivery, a program prepares an email draft with the load's invoice and paperwork. The owner reviews every draft and sends it himself.</li>
+  </ul>
+
+  <h2>bik-dispatch</h2>
+  <p>bik-dispatch is the owner's alarm app. It shows short alerts from his own computer, such as a payment arriving or a bill coming due.</p>
+
+  <p><a href="privacy.html">Privacy policy</a></p>
+
+  <footer>BMH Solutions LLC · bmhsolutions3711@gmail.com</footer>
+</main>
+</body>
+</html>
