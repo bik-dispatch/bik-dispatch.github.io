@@ -136,6 +136,7 @@ h1{flex:1;min-width:0;margin:0;font:700 15px/1 var(--sans);letter-spacing:.18em;
   touch-action:manipulation;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 .key small{display:block;margin-top:4px;font:600 11px/1 var(--mono);letter-spacing:.06em;color:var(--dim)}
 .key>span,.key>small{position:relative}
+.key small{overflow-wrap:anywhere}   /* a long card title under NEXT UP wraps inside the key instead of being cut */
 .key.hold{touch-action:none}
 /* the fill sweep: it reaches the right edge at the moment the word sends */
 .key.hold::before{content:"";position:absolute;inset:0;background:var(--ink);opacity:.24;transform:scaleX(0);
@@ -160,6 +161,7 @@ textarea:focus{border-color:var(--mid)}
 .count{flex:none;padding:0 14px;font:var(--w-body) 13px/1.4 var(--mono);color:var(--dim);text-align:right}
 .count.hot{color:var(--hot);font-weight:700}
 .ver{flex:none;padding:2px 14px 6px;font:11px/1.2 var(--mono);color:var(--dim);text-align:center}
+.ver.out{padding:18px 14px;color:var(--amber);cursor:pointer}   /* a newer build is out: the footer is a tap target too (card #541) */
 
 /* CONNECT and REPLACE: the only two panels, both plain words */
 .panel{flex:1 1 auto;overflow-y:auto;padding:22px 16px}

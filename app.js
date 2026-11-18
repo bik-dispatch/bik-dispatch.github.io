@@ -43,12 +43,24 @@ const SLIP_LABELS = ['TO QA', 'FAILED', 'HELD', 'NEED YOU'];
 const THEME_COLOR = {night: '#07080A', sun: '#EAE0C9'};
 const DENIED = 'Notifications are blocked for Dispatch — Android Settings › Apps › bik-dispatch › Notifications.';
 const NO_ANSWER = 'no answer from the spine (Tailscale?)';
+// card #541: the build THIS page is running. sw.js carries the same string as
+// its VERSION (the build the worker serves). The two MUST match and are bumped
+// together: a page whose BUILD is behind its worker's VERSION is old.
+const BUILD = 'almanac-dispatch-v4';
+const CHECK_EVERY_MS = 5 * 60000;
+const NOT_YET = 'The new version has not reached this phone yet. Try again in a minute.';
+const TRIED_KEY = 'dispatch_update_tried';
 
 const $ = id => document.getElementById(id);
 const store = {   // storage that never throws: a blocked store must not take the line down
   get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } },
   del(k) { try { localStorage.removeItem(k); } catch (e) {} },
+};
+const session = {   // sessionStorage survives a reload of this tab and nothing else; same never-throws rule
+  get(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { sessionStorage.setItem(k, v); return true; } catch (e) { return false; } },
+  del(k) { try { sessionStorage.removeItem(k); } catch (e) {} },
 };
 
 const S = {
@@ -63,6 +75,10 @@ const S = {
   reg: null, scopeWrong: false, broken: '', bellNote: '', bellBooted: false,
   polling: false, again: '', timer: 0, composeBusy: false,
   offer: null, version: '',
+  rulings: null,            // {open, waiting, asked_today, cap} from the spine, or null (card #540)
+  nextUp: null,             // {id, title}: the card the NEXT UP key would approve, or null
+  nextBusy: false, nextTaken: 0,
+  lastCheck: 0, updating: false,   // card #541; S.version is the build the worker serves
 };
 
 /* ── small helpers ───────────────────────────────────────────────────── */
@@ -240,11 +256,21 @@ function take(d) {
   S.unread = d.unread | 0;
   S.runner = d.runner && typeof d.runner === 'object' ? d.runner : null;
   S.approved = d.approved_waiting | 0;
+  S.rulings = rulingsShape(d.rulings);
+  S.nextUp = d.next_up && typeof d.next_up === 'object' && Number.isInteger(d.next_up.id)
+    ? {id: d.next_up.id, title: String(d.next_up.title || '')} : null;
+  S.nextTaken = 0;          // a fresh answer is the truth about whether that card still waits
   S.bell = d.bell && typeof d.bell === 'object' ? d.bell : null;
   if (d.limits && typeof d.limits === 'object')
     S.limits = {body_max: d.limits.body_max | 0 || 2000, max_cards: d.limits.max_cards | 0 || 1};
   S.now = d.now; S.gotAt = Date.now(); S.lastRead = new Date();
   S.route = 'ok'; S.routeWhy = '';
+}
+
+function rulingsShape(r) {
+  if (!r || typeof r !== 'object') return null;
+  return {open: Number.isInteger(r.open) ? r.open : null, waiting: r.waiting | 0,
+          asked_today: r.asked_today | 0, cap: r.cap | 0};
 }
 
 /* POLL: every 15 s while he can see it, at once when he comes back to it, and
@@ -309,7 +335,7 @@ async function send(text, opts) {
   // HIS send brings the thumb end into view so he sees his words land; a
   // poll never does, so reading back up the line is never yanked away.
   $('log').scrollTop = 0;
-  if (DEMO) { demoSend(body, opts); return true; }
+  if (DEMO) return demoSend(body, opts);
   if (!configured()) return false;
   // a second tap while the same words are already on their way is the same text
   if (S.pending.some(p => p.state === 'sending' && p.body === body)) return false;
@@ -334,7 +360,11 @@ async function send(text, opts) {
     render();
     setTimeout(() => poll(false), 2000);
     setTimeout(() => poll(false), 5000);
-    return true;
+    // what the spine said, for a key that must know (NEXT UP); callers that
+    // only want to know it landed can still treat this as true
+    return {command: d.command || null, error: !!d.error,
+            title: d.reply && typeof d.reply.title === 'string' ? d.reply.title : '',
+            body: d.reply && typeof d.reply.body === 'string' ? d.reply.body : ''};
   }
   p.state = 'failed';
   p.reason = !r ? (err === NO_ANSWER || !err
@@ -378,6 +408,7 @@ async function startWorker() {
   if (reg.scope !== HERE) { S.scopeWrong = true; renderBell(); return null; }
   if (!(await activated(reg))) { S.broken = 'the worker never came up'; renderBell(); return null; }
   S.reg = reg;
+  S.lastCheck = Date.now();          // the browser re-reads sw.js itself when the page loads
   askVersion();
   renderBell();
   maybeBootBell();
@@ -400,6 +431,51 @@ function activated(reg) {
 
 function askVersion() {
   try { if (S.reg && S.reg.active) S.reg.active.postMessage({type: 'VERSION'}); } catch (e) {}
+}
+
+/* THE NEWER-BUILD CHECK (card #541). The worker is the one that knows which
+   build the server is serving: asked to (reg.update), the browser re-reads
+   sw.js, a new worker installs the new files, takes over at once and answers
+   VERSION with its own. The page only compares that number with BUILD. It
+   fetches nothing itself, so the page's connect-src stays as tight as it was,
+   and the UPDATE key cannot show before the new files are on this phone. A
+   worker that cannot be asked says nothing: this never claims an update it
+   has not seen. Never in the demo. */
+const buildNo = v => { const m = /-v(\d+)$/.exec(String(v || '')); return m ? Number(m[1]) : 0; };
+const outOfDate = () => buildNo(S.version) > buildNo(BUILD);
+
+async function checkVersion() {
+  if (DEMO || !S.reg) return;
+  S.lastCheck = Date.now();
+  try { await S.reg.update(); } catch (e) {}
+  askVersion();
+}
+
+// The worker answered VERSION: at start, after a check, and when a new worker takes over.
+function versionSeen(v) {
+  S.version = String(v || '');
+  const n = $('notice');
+  if (!outOfDate()) {
+    session.del(TRIED_KEY);
+    if (n.textContent === NOT_YET) notice('', false);
+  } else if (session.get(TRIED_KEY) === S.version && (n.hidden || !n.textContent)) {
+    // the page reloaded for this very build and is still running the old one
+    notice(NOT_YET, false);
+  }
+  renderVer();
+  renderKeys();
+}
+
+/* ONE TAP. His unsent words are already in storage (the box saves on every
+   keystroke and boot() puts them back); they are saved once more here to be
+   sure. Then the page reloads, and the new worker already holds the new files. */
+function updateNow() {
+  if (S.updating) return;
+  S.updating = true;
+  const t = $('txt').value;
+  if (t) store.set('dispatch_draft', t);
+  session.set(TRIED_KEY, S.version);
+  location.reload();
 }
 
 function b64u(s) {
@@ -545,7 +621,9 @@ function renderStrip() {
       s.append(el('span', 'pulse'));
       s.append(document.createTextNode('ON #' + (r.card != null ? r.card : '?') + ' · ' + (r.phase || '…') + ' · ' + minutes(r.since) + ' min'));
     } else {
-      s.textContent = 'IDLE · ' + S.approved + ' approved waiting · batches of ' + S.limits.max_cards;
+      s.textContent = 'IDLE · ' + S.approved + ' approved waiting'
+        + (S.rulings ? ' · ' + S.rulings.waiting + ' rulings waiting' : '')
+        + ' · batches of ' + S.limits.max_cards;
     }
     return;
   }
@@ -769,15 +847,50 @@ function renderLog() {
    send path as his typing, so the line shows exactly what was said. */
 function keySet() {
   if (!DEMO && !configured()) return [];
-  if (running()) return [
+  const ks = [];
+  // card #541: a newer build is out; first in every state
+  if (outOfDate())
+    ks.push({word: 'update', label: 'UPDATE', sub: 'v' + buildNo(S.version) + ' is out', aria: 'update to v' + buildNo(S.version), act: updateNow});
+  if (running()) return ks.concat([
     {word: 'status', label: 'STATUS', aria: 'send status'},
     {word: 'stop', label: 'STOP', sub: 'hold', hold: true, aria: 'hold to send stop'},
-  ];
-  const ks = [];
+  ]);
+  const rl = S.rulings;       // null when the spine could not say: then no ruling keys
+  if (rl && rl.open != null) {
+    ks.push({word: 'skip', label: 'SKIP', sub: '#' + rl.open, aria: 'send skip'});
+    ks.push({word: 'quit', label: 'QUIT', sub: 'done for today', aria: 'send quit'});
+  } else if (rl && rl.waiting > 0 && rl.asked_today < rl.cap) {
+    ks.push({word: 'rulings', label: 'RULINGS', sub: rl.waiting + ' waiting', aria: 'send rulings'});
+  }
+  // ONE card, never approve-all. Only with nothing approved yet and not
+  // already taken by a tap whose answer the poll has not confirmed.
+  if (S.nextUp && S.approved === 0 && S.nextTaken !== S.nextUp.id) {
+    const id = S.nextUp.id, t = S.nextUp.title;
+    ks.push({word: 'approve ' + id, label: 'NEXT UP', sub: '#' + id + ' ' + (t.length > 22 ? t.slice(0, 21) + '…' : t),
+             aria: 'send approve ' + id + ' then run', act: () => nextUp(id)});
+  }
   if (S.approved > 0 && !runInSlipId())
     ks.push({word: 'run', label: 'RUN', sub: DEMO ? 'demo' : S.approved + ' approved', aria: 'send run'});
   ks.push({word: 'status', label: 'STATUS', aria: 'send status'});
   return ks;
+}
+
+/* NEXT UP: 'approve <id>' through the same send path as his typing, then 'run'
+   ONLY when the spine says it took the card. A refusal is a 200 whose answer
+   begins 'Approved 0' with the reason under 'Not taken', or a sentence that
+   says 'nothing approved'; so only 'Approved <n>' with n above 0, or a card
+   that was already approved, counts. A failed send returns false. */
+const APPROVE_TOOK = /^Approved (?:[1-9]\d*|0 \([1-9]\d* already\))/;
+async function nextUp(id) {
+  if (S.nextBusy) return;
+  S.nextBusy = true;
+  try {
+    const r = await send('approve ' + id);
+    if (!r || r.command !== 'approve' || r.error || !APPROVE_TOOK.test(r.body)) return;
+    S.nextTaken = id;
+    renderKeys();
+    await send('run');
+  } finally { S.nextBusy = false; }
 }
 
 function renderKeys() {
@@ -795,7 +908,7 @@ function makeKey(k) {
   if (k.sub) b.append(el('small', null, k.sub));
   b.setAttribute('aria-label', k.aria);
   if (k.hold) holdKey(b, k.word);
-  else b.addEventListener('click', () => send(k.word));
+  else b.addEventListener('click', () => (k.act ? k.act() : send(k.word)));
   return b;
 }
 
@@ -845,8 +958,14 @@ function counter() {
 }
 
 function renderVer() {
-  $('ver').textContent = DEMO ? 'dispatch demo · no worker'
-    : 'dispatch ' + (S.version ? S.version.replace(/^almanac-dispatch-/, '') : '…');
+  // what this page runs comes from BUILD; the worker's answer only says whether a newer one is out
+  const v = $('ver'), out = !DEMO && outOfDate();
+  v.textContent = DEMO ? 'dispatch demo · no worker'
+    : 'dispatch v' + buildNo(BUILD) + (out ? ' · v' + buildNo(S.version) + ' is out · tap to update' : '');
+  // the footer is the way to update when the keys are not on screen (a phone not connected yet)
+  v.classList.toggle('out', out);
+  if (out) { v.setAttribute('role', 'button'); v.tabIndex = 0; }
+  else { v.removeAttribute('role'); v.removeAttribute('tabindex'); }
 }
 
 function view() {
@@ -873,7 +992,7 @@ function render() {
 function demoParse(body) {
   // the same whole-message rule as the spine: 'run the numbers' stays free text
   const n = body.toLowerCase().trim().replace(/^["'“”‘’]+|["'“”‘’]+$/g, '').replace(/[.!?,\s]+$/, '').replace(/\s+/g, ' ');
-  if (n === 'run' || n === 'stop' || n === 'status') return n;
+  if (n === 'run' || n === 'stop' || n === 'status' || n === 'rulings' || n === 'skip' || n === 'quit') return n;
   const toks = n.split(' ');
   if (toks[0] === 'approve' || toks[0] === 'approved') return 'approve';
   if (toks[0] === 'hold' && toks.length > 1 &&
@@ -905,13 +1024,34 @@ function demoSend(body, opts) {
     reply = ['status', 'Status', r.running
       ? 'On #' + r.card + ' — ' + r.card_title + ' · ' + r.phase + ' since ' + hhmm(when(r.since)) + ' · ' + r.done_n + ' landed this batch.'
       : 'Idle. ' + S.approved + ' approved card(s) waiting · batches take ' + S.limits.max_cards + '.'];
+  } else if (verb === 'approve' && S.nextUp && new RegExp('(^|\\D)' + S.nextUp.id + '(\\D|$)').test(body)) {
+    // the one demo card the NEXT UP key offers: answered the way the spine answers a taken card
+    reply = ['ack', 'Approvals', 'Approved 1: #' + S.nextUp.id + '. Say run when you want them built.'];
+    S.approved += 1; S.nextUp = null;
   } else if (verb === 'approve' || verb === 'hold') {
     reply = ['ack', verb === 'approve' ? 'Approvals' : 'Held', 'Demo: nothing was approved or held. The real line answers this.'];
+  } else if (verb === 'rulings' || verb === 'skip' || verb === 'quit') {
+    const rl = S.rulings || {open: null, waiting: 0, asked_today: 0, cap: 5};
+    if (verb === 'rulings') {
+      if (rl.open != null) reply = ['ack', 'Rulings', '#' + rl.open + ' is still open. Reply with your ruling, or skip / quit.'];
+      else if (rl.waiting > 0) {
+        S.rulings = {...rl, open: 940 + rl.asked_today, asked_today: rl.asked_today + 1};
+        reply = ['ack', 'Rulings', 'Demo: the real line asks the next card here.'];
+      } else reply = ['ack', 'Rulings', 'No card is waiting on your ruling.'];
+    } else if (rl.open == null) reply = ['ack', 'Rulings', 'No card is open.'];
+    else if (verb === 'skip') {
+      reply = ['ack', 'Skipped', 'Skipped #' + rl.open + '. It comes back another day.'];
+      S.rulings = {...rl, open: null, waiting: Math.max(0, rl.waiting - 1)};
+    } else {
+      reply = ['ack', 'Done for today', 'Done for today. Text rulings any time for the next one.'];
+      S.rulings = {...rl, open: null};
+    }
   }
   if (reply) S.msgs.set(++S.demoId, {id: S.demoId, at: now, sender: 'operation', kind: reply[0],
                                       title: reply[1], body: reply[2], read_at: now, seen_by_spine_at: null});
   if (opts && opts.compose) { $('txt').value = ''; autosize(); }
   render();
+  return {command: verb, error: false, title: reply ? reply[1] : '', body: reply ? reply[2] : ''};
 }
 
 function demoBoot() {
@@ -947,7 +1087,9 @@ function demoBoot() {
     S.msgs.set(++S.demoId, {id: S.demoId, at: r.at, sender: r.sender, kind: r.kind, title: r.title || null,
                             body: r.body, read_at: r.read ? r.at : null, seen_by_spine_at: r.seen ? r.at : null});
   S.runner = {running: false, card: null, card_title: null, phase: null, since: null, beat_at: null, run: null, done_n: 0};
-  S.approved = 4;
+  S.approved = 0;           // nothing approved yet, so the NEXT UP key shows; tapping it approves one
+  S.rulings = {open: 921, waiting: 3, asked_today: 1, cap: 5};
+  S.nextUp = {id: 930, title: 'Demo card: show the next one up'};
   S.limits = {body_max: 2000, max_cards: 1};
   S.now = new Date(t).toISOString(); S.gotAt = t; S.route = 'ok';
   renderVer();
@@ -976,6 +1118,10 @@ function wire() {
     theme(mode);
   });
   $('bell').addEventListener('click', bellTap);
+  $('ver').addEventListener('click', () => { if (!DEMO && outOfDate()) updateNow(); });
+  $('ver').addEventListener('keydown', e => {
+    if ((e.key === 'Enter' || e.key === ' ') && !DEMO && outOfDate()) { e.preventDefault(); updateNow(); }
+  });
   const t = $('txt');
   t.addEventListener('input', () => {
     // the draft lives in storage until a 200, so a killed tab keeps his words
@@ -1012,8 +1158,10 @@ function wire() {
   });
   if (DEMO) return;
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') poll(true);
-    else clearTimeout(S.timer);
+    if (document.visibilityState === 'visible') {
+      poll(true);
+      if (Date.now() - S.lastCheck > CHECK_EVERY_MS) checkVersion();
+    } else clearTimeout(S.timer);
   });
   addEventListener('focus', () => poll(true));
   if ('serviceWorker' in navigator) {
@@ -1021,7 +1169,7 @@ function wire() {
       // only OUR worker speaks on this line; the root worker's words are not ours
       if (!e.source || e.source.scriptURL !== OUR_WORKER) return;
       const d = e.data || {};
-      if (d.type === 'VERSION') { S.version = String(d.version || ''); renderVer(); }
+      if (d.type === 'VERSION') versionSeen(d.version);
       if (d.type === 'RESUBSCRIBED') subscribe(false).then(() => poll(true));
     });
     navigator.serviceWorker.addEventListener('controllerchange', () => setTimeout(askVersion, 300));
