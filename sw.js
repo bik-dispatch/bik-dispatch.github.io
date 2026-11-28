@@ -25,7 +25,7 @@
 // v2 (card #386): the line now carries Almanac's alerts — app.js tags them
 // ALERT and index.html styles them hot.
 // app.js carries this same string as BUILD: the two must match and are bumped together.
-const VERSION = 'almanac-dispatch-v4';   // bump whenever ANY dispatch file changes; the root VERSION is separate
+const VERSION = 'almanac-dispatch-v5';   // bump whenever ANY dispatch file changes; the root VERSION is separate
 const PREFIX = 'almanac-dispatch-';
 const SHELL = ['./', './index.html', './app.js', './manifest.webmanifest',
                './icons/icon-192.png', './icons/icon-512.png',

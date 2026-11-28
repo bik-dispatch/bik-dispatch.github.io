@@ -61,6 +61,8 @@ h1{flex:1;min-width:0;margin:0;font:700 15px/1 var(--sans);letter-spacing:.18em;
 .bell.off{color:var(--amber);border-color:var(--amber)}
 .bell.broken{color:var(--hot);border-color:var(--hot)}
 .bell.wait{color:var(--dim)}
+.pull{color:var(--dim)}   /* the version pill: tap = fetch the newest and reload, as Almanac's stamp does (card #541) */
+.pull.out{color:var(--amber);border-color:var(--amber)}
 
 .why,.notice{flex:none;margin:0;padding:8px 14px;font:var(--w-body) 15px/1.4 var(--sans);color:var(--mid);
   border-bottom:1px solid var(--line);overflow-wrap:anywhere}
@@ -182,6 +184,7 @@ textarea:focus{border-color:var(--mid)}
   <div id="demo" class="demo" hidden>DEMO — NOT THE LINE</div>
   <header>
     <h1>DISPATCH</h1>
+    <button id="pull" class="chip pull" type="button" aria-label="dispatch version: tap to fetch the newest and reload">v…</button>
     <button id="theme" class="chip" type="button" aria-label="switch to the sun theme">SUN</button>
     <button id="bell" class="chip bell wait" type="button" aria-label="the bell: checking">BELL …</button>
   </header>
@@ -216,7 +219,7 @@ textarea:focus{border-color:var(--mid)}
     <button id="send" class="send" type="button" aria-label="send">SEND</button>
   </div>
   <div id="count" class="count" aria-live="polite" hidden></div>
-  <footer id="ver" class="ver">dispatch …</footer>
+  <footer id="ver" class="ver" role="button" tabindex="0">dispatch …</footer>
 </div>
 <script src="app.js"></script>
 </body>

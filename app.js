@@ -46,10 +46,10 @@ const NO_ANSWER = 'no answer from the spine (Tailscale?)';
 // card #541: the build THIS page is running. sw.js carries the same string as
 // its VERSION (the build the worker serves). The two MUST match and are bumped
 // together: a page whose BUILD is behind its worker's VERSION is old.
-const BUILD = 'almanac-dispatch-v4';
+const BUILD = 'almanac-dispatch-v5';
 const CHECK_EVERY_MS = 5 * 60000;
 const NOT_YET = 'The new version has not reached this phone yet. Try again in a minute.';
-const TRIED_KEY = 'dispatch_update_tried';
+const PULLED_KEY = 'dispatch_pulled';
 
 const $ = id => document.getElementById(id);
 const store = {   // storage that never throws: a blocked store must not take the line down
@@ -79,6 +79,7 @@ const S = {
   nextUp: null,             // {id, title}: the card the NEXT UP key would approve, or null
   nextBusy: false, nextTaken: 0,
   lastCheck: 0, updating: false,   // card #541; S.version is the build the worker serves
+  pulled: false, checked: false,   // he tapped the version pill; the reload after it found nothing newer
 };
 
 /* ── small helpers ───────────────────────────────────────────────────── */
@@ -452,29 +453,51 @@ async function checkVersion() {
 }
 
 // The worker answered VERSION: at start, after a check, and when a new worker takes over.
+let checkedTimer = 0;
 function versionSeen(v) {
   S.version = String(v || '');
   const n = $('notice');
   if (!outOfDate()) {
-    session.del(TRIED_KEY);
     if (n.textContent === NOT_YET) notice('', false);
-  } else if (session.get(TRIED_KEY) === S.version && (n.hidden || !n.textContent)) {
-    // the page reloaded for this very build and is still running the old one
+    if (S.pulled) {                       // he pulled and this IS the newest: say so on the pill, briefly
+      S.pulled = false; S.checked = true;
+      clearTimeout(checkedTimer);
+      checkedTimer = setTimeout(() => { S.checked = false; renderVer(); }, 6000);
+    }
+  } else if (S.pulled && (n.hidden || !n.textContent)) {
+    // he pulled, the worker is newer, and this page still runs the old files
     notice(NOT_YET, false);
   }
   renderVer();
   renderKeys();
 }
 
-/* ONE TAP. His unsent words are already in storage (the box saves on every
-   keystroke and boot() puts them back); they are saved once more here to be
-   sure. Then the page reloads, and the new worker already holds the new files. */
-function updateNow() {
+/* THE PULL (card #541, his word at QA: "still not able to check or refresh like
+   we do in Almanac"). The same move as Almanac's version stamp: tap the version
+   and the app fetches the newest and reloads, whether or not it already knew
+   of one. The worker skip-waits at install, so the moment a newer one takes
+   the controller is the moment to reload; with nothing newer the page reloads
+   after 3 seconds anyway, which re-reads the line. His unsent words are
+   already in storage (the box saves on every keystroke and boot() puts them
+   back); they are saved once more here to be sure. */
+async function pullNewest() {
   if (S.updating) return;
   S.updating = true;
   const t = $('txt').value;
   if (t) store.set('dispatch_draft', t);
-  session.set(TRIED_KEY, S.version);
+  session.set(PULLED_KEY, '1');
+  renderVer();
+  if (outOfDate()) { location.reload(); return; }   // the newer worker already holds the new files
+  try {
+    const r = S.reg || (('serviceWorker' in navigator) ? await navigator.serviceWorker.getRegistration() : null);
+    if (r) {
+      navigator.serviceWorker.addEventListener('controllerchange', () => location.reload(), {once: true});
+      setTimeout(() => location.reload(), 3000);     // already the newest, or a browser that never fires the event
+      await r.update();
+      if (r.waiting) r.waiting.postMessage({type: 'SKIP_WAITING'});
+      return;
+    }
+  } catch (e) { /* the reload below still serves the point */ }
   location.reload();
 }
 
@@ -850,7 +873,7 @@ function keySet() {
   const ks = [];
   // card #541: a newer build is out; first in every state
   if (outOfDate())
-    ks.push({word: 'update', label: 'UPDATE', sub: 'v' + buildNo(S.version) + ' is out', aria: 'update to v' + buildNo(S.version), act: updateNow});
+    ks.push({word: 'update', label: 'UPDATE', sub: 'v' + buildNo(S.version) + ' is out', aria: 'update to v' + buildNo(S.version), act: pullNewest});
   if (running()) return ks.concat([
     {word: 'status', label: 'STATUS', aria: 'send status'},
     {word: 'stop', label: 'STOP', sub: 'hold', hold: true, aria: 'hold to send stop'},
@@ -959,13 +982,18 @@ function counter() {
 
 function renderVer() {
   // what this page runs comes from BUILD; the worker's answer only says whether a newer one is out
-  const v = $('ver'), out = !DEMO && outOfDate();
+  const out = !DEMO && outOfDate(), mine = 'v' + buildNo(BUILD);
+  const v = $('ver'), p = $('pull');
   v.textContent = DEMO ? 'dispatch demo · no worker'
-    : 'dispatch v' + buildNo(BUILD) + (out ? ' · v' + buildNo(S.version) + ' is out · tap to update' : '');
-  // the footer is the way to update when the keys are not on screen (a phone not connected yet)
+    : 'dispatch ' + mine + (out ? ' · v' + buildNo(S.version) + ' is out · tap to update' : '');
   v.classList.toggle('out', out);
-  if (out) { v.setAttribute('role', 'button'); v.tabIndex = 0; }
-  else { v.removeAttribute('role'); v.removeAttribute('tabindex'); }
+  // THE VERSION PILL, where Almanac keeps its own: tap = fetch the newest and reload
+  p.textContent = S.updating ? 'pulling…' : out ? mine + ' → v' + buildNo(S.version) : mine + (S.checked ? ' ✓' : '');
+  p.classList.toggle('out', out);
+  p.setAttribute('aria-label', S.updating ? 'fetching the newest'
+    : out ? 'dispatch ' + mine + ': v' + buildNo(S.version) + ' is out, tap to update'
+    : S.checked ? 'dispatch ' + mine + ' is the newest'
+    : 'dispatch ' + mine + ': tap to fetch the newest and reload');
 }
 
 function view() {
@@ -1118,9 +1146,10 @@ function wire() {
     theme(mode);
   });
   $('bell').addEventListener('click', bellTap);
-  $('ver').addEventListener('click', () => { if (!DEMO && outOfDate()) updateNow(); });
+  $('pull').addEventListener('click', pullNewest);
+  $('ver').addEventListener('click', pullNewest);     // the footer is the same tap, for a thumb at the bottom
   $('ver').addEventListener('keydown', e => {
-    if ((e.key === 'Enter' || e.key === ' ') && !DEMO && outOfDate()) { e.preventDefault(); updateNow(); }
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pullNewest(); }
   });
   const t = $('txt');
   t.addEventListener('input', () => {
@@ -1184,6 +1213,8 @@ async function boot() {
   const cfg = takeCfgHash();          // scrubbed before anything else runs
   loadCfg();
   $('txt').value = store.get('dispatch_draft') || '';
+  S.pulled = session.get(PULLED_KEY) === '1';      // set by the pull just before its reload
+  session.del(PULLED_KEY);
   autosize();
   renderVer();
   // The worker registers whether or not this phone is connected yet, so the
